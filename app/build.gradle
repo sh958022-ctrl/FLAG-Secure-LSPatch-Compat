@@ -1,0 +1,31 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.openai.flagsecure.compat'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.openai.flagsecure.compat'
+        minSdk 26
+        targetSdk 30
+        versionCode 1
+        versionName '2.0.0-lspatch-compat1'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    compileOnly files('libs/xposed-api-stubs.jar')
+}
