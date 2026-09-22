@@ -9,9 +9,13 @@ android {
     defaultConfig {
         applicationId 'com.openai.flagsecure.compat'
         minSdk 26
+
+        // Keep a conservative targetSdk for the tiny module APK itself.
+        // The module runs inside the patched target app process under LSPatch.
         targetSdk 30
-        versionCode 1
-        versionName '2.0.0-lspatch-compat1'
+
+        versionCode 2
+        versionName '2.1.0-lspatch487-safe1'
     }
 
     buildTypes {
