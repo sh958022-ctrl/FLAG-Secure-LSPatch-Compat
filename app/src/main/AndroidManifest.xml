@@ -3,10 +3,19 @@
     <application
         android:allowBackup="false"
         android:hasCode="true"
-        android:label="FLAG Secure LSPatch Compat"
+        android:label="FLAG Secure LSPatch 487 Safe"
         android:supportsRtl="true">
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="LSPatch 439 compatibility build for Disable-FLAG_SECURE" />
-        <meta-data android:name="xposedminversion" android:value="82" />
+
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Android 16 / LSPatch 487 app-process FLAG_SECURE compatibility build" />
+
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
     </application>
 </manifest>
