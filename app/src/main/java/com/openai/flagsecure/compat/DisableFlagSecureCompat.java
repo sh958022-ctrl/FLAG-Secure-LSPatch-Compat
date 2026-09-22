@@ -1,50 +1,63 @@
 package com.openai.flagsecure.compat;
 
+import android.os.Build;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 
-import java.lang.reflect.Method;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Compatibility-oriented rewrite of VarunS2002/Xposed-Disable-FLAG_SECURE 2.0.0.
+ * LSPatch 487 / Android 16 oriented FLAG_SECURE compatibility module.
  *
- * Design goals:
- *  - keep app-process hooks for Window.setFlags, SurfaceView.setSecure and
- *    WindowManagerGlobal add/update paths;
- *  - do not resolve system_server-only classes in ordinary app processes;
- *  - isolate every hook behind its own Throwable boundary;
- *  - avoid Kotlin/runtime helper classes and static hook initialization;
- *  - avoid hard-coding WindowManagerGlobal overload signatures where possible.
+ * Goals:
+ *  - app-process only: no system_server/com.android.server.wm hooks;
+ *  - no Kotlin runtime dependency;
+ *  - each hook is isolated so one API mismatch cannot abort app startup;
+ *  - no unsafe LayoutParams cast;
+ *  - no hard-coded hidden WindowManagerGlobal overload signatures;
+ *  - install hooks only once per process.
  */
 public final class DisableFlagSecureCompat implements IXposedHookLoadPackage {
-    private static final String TAG = "FLAGSecureCompat: ";
+    private static final String TAG = "FLAGSecure487: ";
+    private static final AtomicBoolean INSTALLED = new AtomicBoolean(false);
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
         if (lpparam == null) return;
 
-        safeLog("loading for " + lpparam.packageName + " / " + lpparam.processName);
+        // LSPatch integrated mode loads this inside the target app process.
+        // Never try to act as a system_server module here.
+        if ("android".equals(lpparam.packageName) || "android".equals(lpparam.processName)) {
+            safeLog("skip system process");
+            return;
+        }
+
+        if (!INSTALLED.compareAndSet(false, true)) {
+            safeLog("hooks already installed for process " + lpparam.processName);
+            return;
+        }
+
+        safeLog(
+                "loading package=" + lpparam.packageName
+                        + " process=" + lpparam.processName
+                        + " sdk=" + Build.VERSION.SDK_INT
+        );
 
         hookWindowSetFlags();
+        hookWindowSetAttributes();
         hookSurfaceViewSetSecure();
         hookWindowManagerGlobal(lpparam.classLoader);
 
-        // These hooks only make sense inside Android's system_server. In rootless
-        // LSPatch integrated mode the target app is not system_server, so attempting
-        // to resolve com.android.server.wm.* there adds risk without benefit.
-        if ("android".equals(lpparam.packageName) || "android".equals(lpparam.processName)) {
-            hookSystemServer(lpparam.classLoader);
-        }
+        safeLog("hook installation complete");
     }
 
     private static void hookWindowSetFlags() {
@@ -57,7 +70,12 @@ public final class DisableFlagSecureCompat implements IXposedHookLoadPackage {
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof Integer)) return;
+                            if (param.args == null
+                                    || param.args.length < 1
+                                    || !(param.args[0] instanceof Integer)) {
+                                return;
+                            }
+
                             int flags = (Integer) param.args[0];
                             param.args[0] = flags & ~WindowManager.LayoutParams.FLAG_SECURE;
                         }
@@ -66,6 +84,30 @@ public final class DisableFlagSecureCompat implements IXposedHookLoadPackage {
             safeLog("Window.setFlags hooked");
         } catch (Throwable t) {
             safeLog("Window.setFlags skipped: " + t);
+        }
+    }
+
+    private static void hookWindowSetAttributes() {
+        try {
+            XposedHelpers.findAndHookMethod(
+                    Window.class,
+                    "setAttributes",
+                    WindowManager.LayoutParams.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (param.args == null || param.args.length < 1) return;
+
+                            Object arg = param.args[0];
+                            if (arg instanceof WindowManager.LayoutParams) {
+                                clearSecureFlag((WindowManager.LayoutParams) arg);
+                            }
+                        }
+                    }
+            );
+            safeLog("Window.setAttributes hooked");
+        } catch (Throwable t) {
+            safeLog("Window.setAttributes skipped: " + t);
         }
     }
 
@@ -92,60 +134,53 @@ public final class DisableFlagSecureCompat implements IXposedHookLoadPackage {
 
     private static void hookWindowManagerGlobal(ClassLoader appClassLoader) {
         try {
-            final Class<?> wmg = XposedHelpers.findClass("android.view.WindowManagerGlobal", appClassLoader);
-            final XC_MethodHook clearLayoutParamsHook = new XC_MethodHook() {
+            Class<?> wmg = XposedHelpers.findClass(
+                    "android.view.WindowManagerGlobal",
+                    appClassLoader
+            );
+
+            XC_MethodHook clearLayoutParamsHook = new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     if (param.args == null) return;
+
                     for (Object arg : param.args) {
                         if (arg instanceof WindowManager.LayoutParams) {
-                            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) arg;
-                            lp.flags &= ~WindowManager.LayoutParams.FLAG_SECURE;
+                            clearSecureFlag((WindowManager.LayoutParams) arg);
+                        } else if (arg instanceof ViewGroup.LayoutParams) {
+                            // Intentionally ignore non-WindowManager LayoutParams.
+                            // Do not cast them: a forced cast can crash the target app.
                         }
                     }
                 }
             };
 
-            Set<XC_MethodHook.Unhook> add = XposedBridge.hookAllMethods(wmg, "addView", clearLayoutParamsHook);
-            Set<XC_MethodHook.Unhook> update = XposedBridge.hookAllMethods(wmg, "updateViewLayout", clearLayoutParamsHook);
-            safeLog("WindowManagerGlobal hooked: addView=" + add.size() + ", updateViewLayout=" + update.size());
+            Set<XC_MethodHook.Unhook> addHooks =
+                    XposedBridge.hookAllMethods(wmg, "addView", clearLayoutParamsHook);
+            Set<XC_MethodHook.Unhook> updateHooks =
+                    XposedBridge.hookAllMethods(wmg, "updateViewLayout", clearLayoutParamsHook);
+
+            safeLog(
+                    "WindowManagerGlobal hooked addView="
+                            + addHooks.size()
+                            + " updateViewLayout="
+                            + updateHooks.size()
+            );
         } catch (Throwable t) {
             safeLog("WindowManagerGlobal skipped: " + t);
         }
     }
 
-    private static void hookSystemServer(ClassLoader classLoader) {
-        try {
-            Class<?> windowState = XposedHelpers.findClass("com.android.server.wm.WindowState", classLoader);
-            XposedHelpers.findAndHookMethod(
-                    windowState,
-                    "isSecureLocked",
-                    XC_MethodReplacement.returnConstant(false)
-            );
-            safeLog("WindowState.isSecureLocked hooked");
-        } catch (Throwable t) {
-            safeLog("WindowState hook skipped: " + t);
-        }
-
-        try {
-            Class<?> windowState = XposedHelpers.findClass("com.android.server.wm.WindowState", classLoader);
-            XposedHelpers.findAndHookMethod(
-                    "com.android.server.wm.WindowManagerService",
-                    classLoader,
-                    "isSecureLocked",
-                    windowState,
-                    XC_MethodReplacement.returnConstant(false)
-            );
-            safeLog("WindowManagerService.isSecureLocked hooked");
-        } catch (Throwable t) {
-            safeLog("WindowManagerService hook skipped: " + t);
-        }
+    private static void clearSecureFlag(WindowManager.LayoutParams lp) {
+        if (lp == null) return;
+        lp.flags &= ~WindowManager.LayoutParams.FLAG_SECURE;
     }
 
     private static void safeLog(String message) {
         try {
             XposedBridge.log(TAG + message);
         } catch (Throwable ignored) {
+            // Logging must never be able to break target app startup.
         }
     }
 }
