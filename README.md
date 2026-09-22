@@ -1,20 +1,52 @@
-# FLAG Secure LSPatch Compat
+# FLAG Secure LSPatch 487 Safe
 
-Compatibility rewrite of the app-process behavior in VarunS2002/Xposed-Disable-FLAG_SECURE 2.0.0 for testing with LSPatch 0.8 build 439 on Android 16.
+A compatibility-focused FLAG_SECURE module build tailored for:
 
-Changes from the original 2.0.0 logic:
+- LSPatch 1.2 build 487
+- Android 16 / API 36
+- Integrated patch mode
+- app-process injection
 
-- Java-only entry class, no Kotlin runtime/helper dependency in the module class.
-- Every hook is isolated with `try/catch(Throwable)`.
-- `com.android.server.wm.*` is only resolved in the `android`/system-server package/process.
-- `WindowManagerGlobal.addView` and `updateViewLayout` use `hookAllMethods`, avoiding hard-coded hidden overload signatures.
-- App hooks for `Window.setFlags`, `SurfaceView.setSecure`, and WindowManager layout params are retained.
-- Separate package id: `com.openai.flagsecure.compat`, so it can coexist with the original module.
+This branch is intentionally conservative. It is designed to reduce the chance that the module itself causes app startup crashes.
 
-Build with Android SDK 36 and JDK 17+:
+## What changed
+
+- Removed all `com.android.server.wm.*` / system_server hooks.
+- Java-only entry class; no Kotlin runtime dependency.
+- Every hook is isolated behind `try/catch(Throwable)`.
+- Added an install-once guard per process.
+- Removed unsafe `LayoutParams` casts.
+- Uses `hookAllMethods` for hidden `WindowManagerGlobal` overloads instead of hard-coded signatures.
+- Hooks:
+  - `Window.setFlags(...)`
+  - `Window.setAttributes(...)`
+  - `SurfaceView.setSecure(false)`
+  - `WindowManagerGlobal.addView(...)`
+  - `WindowManagerGlobal.updateViewLayout(...)`
+- Logging prefix: `FLAGSecure487:`
+
+## Intended LSPatch test setup
+
+- LSPatch: 1.2 (487)
+- Patch mode: Integrated
+- Signature bypass: lv2 first
+- Module: this APK only
+- Verbose patch log: enabled
+
+Test one app at a time. For the current crash investigation, RIDI is the preferred comparison app because the previous Disable-FLAG_SECURE build crashed there while another screenshot module could enter the app.
+
+## Build
+
+GitHub Actions builds automatically on pushes to this branch and can also be started manually.
+
+Artifact name:
+
+`FLAG-Secure-LSPatch-487-Safe`
+
+Local build:
 
 ```bash
-./gradlew :app:assembleRelease
+gradle :app:assembleDebug
 ```
 
-The project uses a compile-only Xposed API stub jar. It is not packaged into the APK.
+The Xposed API stub jar is compile-only and is not packaged into the APK.
