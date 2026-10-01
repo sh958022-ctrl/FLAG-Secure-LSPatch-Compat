@@ -1,6 +1,9 @@
-name: Build APK
+name: Build Selection Toolbar v0.1
 
 on:
+  push:
+    branches:
+      - selection-toolbar-v0.1
   workflow_dispatch:
 
 jobs:
@@ -26,7 +29,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-30" "build-tools;30.0.3"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build APK
         run: gradle assembleDebug
@@ -34,5 +37,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FLAG-Secure-LSPatch-Compat
+          name: Selection-Toolbar-v0.1
           path: app/build/outputs/apk/debug/*.apk

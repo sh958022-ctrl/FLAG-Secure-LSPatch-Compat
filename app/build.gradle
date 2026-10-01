@@ -3,15 +3,15 @@ plugins {
 }
 
 android {
-    namespace 'com.openai.flagsecure.compat'
+    namespace 'com.sh958022.selectiontoolbar'
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.openai.flagsecure.compat'
+        applicationId 'com.sh958022.selectiontoolbar'
         minSdk 26
         targetSdk 30
         versionCode 1
-        versionName '2.0.0-lspatch-compat1'
+        versionName '0.1.0'
     }
 
     buildTypes {
