@@ -22,9 +22,8 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * Goal: keep a compact five-action selection menu:
  *   C | A | AC | +GPT | Tr
  *
- * This is intentionally a prototype. It reuses the host app's original
- * ActionMode callback instead of reimplementing Copy / Select All / Add to chat
- * / Translate behavior.
+ * This prototype reuses the host app's original ActionMode callback instead of
+ * reimplementing Copy / Select All / Add to chat / Translate behavior.
  */
 public final class SelectionToolbarHook implements IXposedHookLoadPackage {
     private static final String TAG = "SelectionToolbar: ";
@@ -71,6 +70,8 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
         private final ActionMode.Callback original;
         private final Handler mainHandler = new Handler(Looper.getMainLooper());
         private Menu lastMenu;
+        private int copyItemId = android.R.id.copy;
+        private int selectAllItemId = android.R.id.selectAll;
 
         ToolbarCallback(ActionMode.Callback original) {
             this.original = original;
@@ -87,10 +88,10 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
 
         @Override
         public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-            boolean changed = original.onPrepareActionMode(mode, menu);
+            original.onPrepareActionMode(mode, menu);
             lastMenu = menu;
             rewriteMenu(menu);
-            return true || changed;
+            return true;
         }
 
         @Override
@@ -121,8 +122,11 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
             final Menu menu = lastMenu;
             if (menu == null) return;
 
-            final MenuItem selectAll = menu.findItem(android.R.id.selectAll);
-            if (selectAll == null) return;
+            final MenuItem selectAll = findAction(menu, selectAllItemId, "A", "모두 선택", "select all");
+            if (selectAll == null) {
+                log("AC: Select All action not found");
+                return;
+            }
 
             try {
                 original.onActionItemClicked(mode, selectAll);
@@ -136,9 +140,11 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
             mainHandler.postDelayed(() -> {
                 try {
                     Menu active = lastMenu != null ? lastMenu : menu;
-                    MenuItem copy = active.findItem(android.R.id.copy);
+                    MenuItem copy = findAction(active, copyItemId, "C", "복사", "copy");
                     if (copy != null) {
                         original.onActionItemClicked(mode, copy);
+                    } else {
+                        log("AC: Copy action not found after Select All");
                     }
                 } catch (Throwable t) {
                     log("AC copy failed: " + t);
@@ -146,7 +152,7 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
             }, 32L);
         }
 
-        private static void rewriteMenu(Menu menu) {
+        private void rewriteMenu(Menu menu) {
             if (menu == null) return;
 
             Snapshot copy = null;
@@ -155,22 +161,27 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
             Snapshot translate = null;
             int translateScore = Integer.MIN_VALUE;
 
-            // Snapshot first because removing while iterating by index is unsafe.
+            // Snapshot first because we clear the host menu afterwards.
             for (int i = 0; i < menu.size(); i++) {
                 MenuItem item = menu.getItem(i);
                 if (item == null) continue;
 
-                if (item.getItemId() == android.R.id.copy) {
-                    copy = Snapshot.of(item);
-                    continue;
-                }
-                if (item.getItemId() == android.R.id.selectAll) {
-                    selectAll = Snapshot.of(item);
-                    continue;
-                }
-
                 String title = item.getTitle() == null ? "" : item.getTitle().toString();
                 String normalized = title.trim().toLowerCase(Locale.ROOT);
+
+                // Android TextView normally uses android.R.id.*, while Compose or
+                // app-owned selection menus may use their own IDs. Match both ID
+                // and visible label so v0.1 works on either path.
+                if (item.getItemId() == android.R.id.copy || isCopy(normalized)) {
+                    copy = Snapshot.of(item);
+                    copyItemId = item.getItemId();
+                    continue;
+                }
+                if (item.getItemId() == android.R.id.selectAll || isSelectAll(normalized)) {
+                    selectAll = Snapshot.of(item);
+                    selectAllItemId = item.getItemId();
+                    continue;
+                }
 
                 if (isAddToChat(normalized)) {
                     addToChat = Snapshot.of(item);
@@ -186,15 +197,8 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
                 }
             }
 
-            // Remove everything from the visible toolbar. v0.1 deliberately keeps
-            // only the five requested actions.
-            while (menu.size() > 0) {
-                MenuItem item = menu.getItem(0);
-                if (item == null) break;
-                int before = menu.size();
-                menu.removeItem(item.getItemId());
-                if (menu.size() == before) break;
-            }
+            // v0.1 deliberately keeps only the five requested actions visible.
+            menu.clear();
 
             if (copy != null) addSnapshot(menu, copy, ORDER_COPY, "C");
             if (selectAll != null) addSnapshot(menu, selectAll, ORDER_SELECT_ALL, "A");
@@ -206,6 +210,16 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
 
             if (addToChat != null) addSnapshot(menu, addToChat, ORDER_GPT, "+GPT");
             if (translate != null) addSnapshot(menu, translate, ORDER_TRANSLATE, "Tr");
+        }
+
+        private static boolean isCopy(String title) {
+            return "복사".equals(title) || "copy".equals(title);
+        }
+
+        private static boolean isSelectAll(String title) {
+            return "모두 선택".equals(title)
+                    || "전체 선택".equals(title)
+                    || "select all".equals(title);
         }
 
         private static boolean isAddToChat(String title) {
@@ -222,6 +236,28 @@ public final class SelectionToolbarHook implements IXposedHookLoadPackage {
             if (title.contains("papago")) return 10;
             if (title.contains("번역") || title.contains("translate")) return 50;
             return Integer.MIN_VALUE;
+        }
+
+        private static MenuItem findAction(Menu menu, int preferredId, String... labels) {
+            if (menu == null) return null;
+
+            try {
+                MenuItem byId = menu.findItem(preferredId);
+                if (byId != null) return byId;
+            } catch (Throwable ignored) {
+            }
+
+            for (int i = 0; i < menu.size(); i++) {
+                MenuItem item = menu.getItem(i);
+                if (item == null || item.getTitle() == null) continue;
+                String title = item.getTitle().toString().trim().toLowerCase(Locale.ROOT);
+                for (String label : labels) {
+                    if (label != null && title.equals(label.toLowerCase(Locale.ROOT))) {
+                        return item;
+                    }
+                }
+            }
+            return null;
         }
 
         private static void addSnapshot(Menu menu, Snapshot s, int order, String label) {
