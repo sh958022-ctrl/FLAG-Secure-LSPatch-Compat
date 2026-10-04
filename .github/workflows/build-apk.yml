@@ -1,9 +1,9 @@
-name: Build Selection Toolbar v0.1
+name: Build ChatGPT Add-to-Chat First
 
 on:
   push:
     branches:
-      - selection-toolbar-v0.1
+      - chatgpt-add-to-chat-first
   workflow_dispatch:
 
 jobs:
@@ -37,5 +37,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Selection-Toolbar-v0.1
+          name: ChatGPT-Add-to-Chat-First
           path: app/build/outputs/apk/debug/*.apk
