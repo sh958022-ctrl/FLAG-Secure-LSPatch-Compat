@@ -3,10 +3,10 @@
     <application
         android:allowBackup="false"
         android:hasCode="true"
-        android:label="Selection Toolbar v0.1"
+        android:label="ChatGPT Add-to-Chat First"
         android:supportsRtl="true">
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="ChatGPT selection toolbar prototype: C / A / AC / +GPT / Tr" />
+        <meta-data android:name="xposeddescription" android:value="Temporary ChatGPT-only patch: move Add to chat into the main selection toolbar row without changing other actions." />
         <meta-data android:name="xposedminversion" android:value="82" />
     </application>
 </manifest>
